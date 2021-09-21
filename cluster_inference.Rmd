@@ -1,0 +1,195 @@
+---
+title: "A cluster-based method to quantify individual heterogeneity in tuberculosis transmission"
+author: "Authors removed for peer review"
+date: "`r Sys.Date()`"   
+output:
+  html_document: 
+    toc: yes
+    code_folding: hide 
+    #fontsize: large 
+  pdf_document: default
+    
+  
+---
+
+<!-- \newcommand{\complete}{\hfill$\Box$} -->
+<!-- \newcommand{\T}{{\mathsf T}} -->
+<!-- \newcommand{\bi}{\begin{itemize}} -->
+<!-- \newcommand{\ei}{\end{itemize}} -->
+<!-- \newcommand{\be}{\begin{eqnarray*}} -->
+<!-- \newcommand{\ee}{\end{eqnarray*}} -->
+<!-- \newcommand{\fr}[2]{\mbox{${\textstyle \frac{#1}{#2}}$}} -->
+<!-- \newcommand{\convd}{\stackrel{\scriptscriptstyle{\text{d}}}{\longrightarrow}} -->
+<!-- \newcommand{\convp}{\stackrel{\scriptscriptstyle{\text{p}}}{\longrightarrow}} -->
+<!-- \newcommand{\convL}{\stackrel{\scriptscriptstyle{\text{$L_1$}}}{\longrightarrow}} -->
+<!-- \newcommand{\convLL}{\stackrel{\scriptscriptstyle{\text{$L_2$}}}{\longrightarrow}} -->
+<!-- \newcommand{\convas}{\stackrel{\scriptscriptstyle{\text{a.s.}}}{\longrightarrow}} -->
+<!-- \newcommand{\eqd}{\stackrel{\scriptscriptstyle{\text{d}}}{=}} -->
+
+--------------------------
+
+Produced with R version `r getRversion()`.
+
+--------------------------
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Probability Density Function
+
+As described in the primary manuscript and supplemental materials, the probability of a transmission chain originating with $n$ index cases resulting in a final transmission cluster size of $y$ can be expressed as:
+
+$$P(Y=y|n)=\left(\frac{n}{y}\right)\frac{\Gamma(ky+y-n)}{\Gamma(ky)\Gamma(y-n-1)}\frac{(\frac{R}{k})^{y-n}}{(1+\frac{R}{k})^{ky+y-n}}$$
+The following code returns the probability of observing a cluster size $Y$ initiating with $n$ index cases with specified negative binomial parameters $R$ and $k$. The code returns the log if `logp==TRUE` and the probability if `logp==FALSE`
+
+```{r}
+##' @param y Cluster size
+##' @param n Index cases/subclusters
+##' @param R Underlying NB R value
+##' @param k Underlying NB k value
+
+nb_yn <- function(y, n, R, k, logp = TRUE) {
+  x <- log(n) - log(y) + lgamma(k*y+y-n) - (lgamma(k*y) + lgamma(y-n+1)) + (y-n) * log(R/k) - (k*y+y-n) * log(1+R/k)
+  if(logp){
+    return(x)
+  } else{
+    return(exp(x))
+    }
+}
+
+```
+## Branching Process
+A single branching process with the generalized probability generating function is defined as: $$G_z(s)=\sum_{z=0}^\infty P(Z=z)s^z$$
+We use the following code to initiate a single branching process:
+```{r}
+##' _____________________________________________________________________________________________________
+##' Simulate single branching process
+##' _____________________________________________________________________________________________________
+##'This function simulates a branching process and generates a single transmission chain 
+##' n+1 generation given by Z_{n+1} = X^n_1 + X^n_2 + ... + X^n_{Zn} 
+##' where X^n_i are IID branching offspring dist 
+##' @param gens number of generations to go out to, excluding initial, default to 20, but can set to Inf(inity) 
+##' @param init.size initial size, default to 1 
+##' @param offspring distribution to be specified
+##' @param ... for passing variable number of inputs depending on choice of offspring
+##--------------------------------------------------------------------------------------------------------------
+bp <- function(gens = 100, init.size = 1, offspring, ...){  
+  Z <- list()
+  Z[[1]] <- init.size
+  i <- 1 
+  while(sum(Z[[i]]) > 0 && i <= gens) { 
+    Z[[i+1]] <- offspring(sum(Z[[i]]), ...) 
+    i <- i+1 
+  } 
+  return(Z)
+} 
+```
+This provides data in the form of a nested list. Each list is a generation. Each position in the list is an individual. The numerical value in the position represents the number of individual secondary cases. For example:
+```{r}
+set.seed(12345678)
+# Example individual branching process with offspring distribution ~ NB(R,k) 
+R <- 0.9
+k <- 0.25
+bp(offspring = rnbinom, size = k, mu = R)
+```
+In this example, generation `[[4]]` has 18 positions (the sum of generation `[[3]]`), representing 18 individuals. Twelve of them had 0 secondary cases, two had 1 secondary case, two had two secondary cases, one had 3 secondary cases, and one had 7 secondary cases. 
+
+
+
+
+## Likelihood function
+
+The likelihood defined in the methods can be generally expressed as:
+$$L(R,k|\vec a\vec b)=\prod_{y=1}^\infty \prod_{n=1}^yP(Y=y|n)^{a_{y,n}}\prod_{y=1}^\infty \prod_{n=1}^yP(Y\geq y|n)^{b_{y,n}}$$
+Where $P(Y=y|n)$ is the negative binomial PDF described above and $P(Y\geq y|n)=1-\sum_{i=1}^{y-1}P(Y=i|n)$
+```{r}
+##' _______________________________________________________________________________________________
+##' Likelihood Function
+##' For use in parameter estimation 
+##'      @param Y 3-column data frame or matrix containing 
+##'                  [,1] Custer Size
+##'                  [,2] Index Cases
+##'                  [,3] Censored status
+##'      @param R NB R value to be plugged into the likelihood
+##'      @param k NB k value to be plugged into the likelihood
+##'      - - - - - - - - - - - - -       
+##'      @return Sum of the log-likelihoods
+##' _______________________________________________________________________________________________
+
+likelihood <- function(Y, R, k) {
+  p_function <- function(y, n){         
+    exp(log(n) - log(y) + lgamma(k*y+y-n) - (lgamma(k*y) + lgamma(y-n+1)) + (y-n)*log(R/k) - (k*y+y-n)*log(1+R/k))
+  }
+  ya <- Y[Y[,3] == 0,] # Uncensored
+  yb <- Y[Y[,3] == 1,] # Censored
+  
+  liks_a <- log(p_function(ya[,1], ya[,2])) 
+  liks_b <- numeric(nrow(yb))              
+  
+  if(nrow(yb) > 0){                          
+    for (i in 1:nrow(yb)){
+      y <- yb[i, 1]
+      n <- yb[i, 2]
+      if (y == 1){                           
+        liks_b[i] <- 0                     
+      } else{
+        liks_b[i] <- log(max(10^-300, 1 - sum(p_function(1:(y - 1),n)), na.rm=TRUE)) 
+      }}}
+  sumliks <- sum(liks_a, liks_b)
+  return(sumliks)
+  #return(cbind(liks_a,liks_b))
+}
+
+```
+## Parameter Estimation
+We use profile likelihood to estimate the parameters $R$ and $k$
+
+```{r}
+##' _______________________________________________________________________________________________
+##' Surface/profile likelihood function
+##' Calculates likelihoods over a range of R and k values
+##'      @param data 3-column data frame or matrix containing 
+##'                  [,1] Custer Size
+##'                  [,2] Index Cases
+##'                  [,3] Censored status
+##'      @param Rrange Range of R values
+##'      @param krange Range of k values
+##'      - - - - - - - - - - - - -       
+##'      @return Rrange by krange Matrix with likelihoods
+##' _______________________________________________________________________________________________
+
+surflike <- function(data, Rrange, krange){
+  likesurf <- matrix(NA, nrow = length(Rrange),length(krange))
+  for(i in 1:length(Rrange)){
+    for(j in 1:length(krange)){
+      likesurf[i,j] <- likelihood(data, Rrange[i],krange[j])
+    }
+  }
+  return(likesurf)
+}
+
+##' _______________________________________________________________________________________________
+##' Parameter Estimation
+##' Estimates MLE and confidence interval for R and k
+##'      @param ls likelihood surface data
+##'      @param ls_max logical likelihood surface data identifying max  (ls_max <- ls==max(ls))
+##'      @param conf.interval Desired confidence interval (as decimal, i.e. 0.95)
+##'      - - - - - - - - - - - - -       
+##'      @return Point, lower, and upper bound estimates for R and k 
+##' _______________________________________________________________________________________________
+
+calc_profile <- function(ls, ls_max, conf.interval){
+  chiV <- qchisq(conf.interval/100, df = 1) / 2
+  prfk <- apply(ls,2,function(x){max(x)})
+  prfk2 <- kkrange[prfk - max(prfk) >- chiV]
+  prfR <- apply(ls,1,function(x){max(x)})
+  prfR2 <- Rrange[prfR - max(prfR) >- chiV]
+  
+  output <- rbind(cbind(Rrange[sum(seq(1,length(Rrange))%*%ls_max)], min(prfR2),max(prfR2)),
+                  cbind(kkrange[sum(ls_max%*%seq(1,length(kkrange)))], min(prfk2),max(prfk2)))
+  colnames(output) <- c("point_est","lower_ci","upper_ci")
+  rownames(output) <- c("R","k")
+  return(output)
+}
+```
