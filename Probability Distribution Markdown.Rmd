@@ -1,6 +1,6 @@
 ---
 title: "A cluster-based method to quantify individual heterogeneity in tuberculosis transmission"
-author: "Authors removed for peer review"
+author: "Authors removed for peer  review"
 date: "`r Sys.Date()`"   
 output:
   html_document: 
