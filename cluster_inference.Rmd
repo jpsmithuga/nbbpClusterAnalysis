@@ -5,7 +5,7 @@ date: "`r Sys.Date()`"
 output:
   html_document: 
     toc: yes
-    code_folding: hide 
+    code_folding: show 
     #fontsize: large 
   pdf_document: default
     
@@ -28,7 +28,7 @@ output:
 
 --------------------------
 
-Produced with R version `r getRversion()`.
+R version `r getRversion()`.
 
 --------------------------
 
@@ -41,7 +41,7 @@ knitr::opts_chunk$set(echo = TRUE)
 As described in the primary manuscript and supplemental materials, the probability of a transmission chain originating with $n$ index cases resulting in a final transmission cluster size of $y$ can be expressed as:
 
 $$P(Y=y|n)=\left(\frac{n}{y}\right)\frac{\Gamma(ky+y-n)}{\Gamma(ky)\Gamma(y-n-1)}\frac{(\frac{R}{k})^{y-n}}{(1+\frac{R}{k})^{ky+y-n}}$$
-The following code returns the probability of observing a cluster size $Y$ initiating with $n$ index cases with specified negative binomial parameters $R$ and $k$. The code returns the log if `logp==TRUE` and the probability if `logp==FALSE`
+The following code returns the probability of observing a cluster size $Y$ initiating with $n$ index cases with specified negative binomial parameters $R$ and $k$. The code returns the log if `logp = TRUE` and the probability if `logp = FALSE`
 
 ```{r}
 ##' @param y Cluster size
@@ -85,20 +85,8 @@ bp <- function(gens = 100, init.size = 1, offspring, ...){
   return(Z)
 } 
 ```
-This provides data in the form of a nested list. Each list is a generation. Each position in the list is an individual. The numerical value in the position represents the number of individual secondary cases. For example:
-```{r}
-set.seed(12345678)
-# Example individual branching process with offspring distribution ~ NB(R,k) 
-R <- 0.9
-k <- 0.25
-bp(offspring = rnbinom, size = k, mu = R)
-```
-In this example, generation `[[4]]` has 18 positions (the sum of generation `[[3]]`), representing 18 individuals. Twelve of them had 0 secondary cases, two had 1 secondary case, two had two secondary cases, one had 3 secondary cases, and one had 7 secondary cases. 
 
-
-
-
-## Likelihood function
+## Likelihood Function
 
 The likelihood defined in the methods can be generally expressed as:
 $$L(R,k|\vec a\vec b)=\prod_{y=1}^\infty \prod_{n=1}^yP(Y=y|n)^{a_{y,n}}\prod_{y=1}^\infty \prod_{n=1}^yP(Y\geq y|n)^{b_{y,n}}$$
@@ -110,7 +98,7 @@ Where $P(Y=y|n)$ is the negative binomial PDF described above and $P(Y\geq y|n)=
 ##'      @param Y 3-column data frame or matrix containing 
 ##'                  [,1] Custer Size
 ##'                  [,2] Index Cases
-##'                  [,3] Censored status
+##'                  [,3] Censored status (1= censored, 0=uncensored)
 ##'      @param R NB R value to be plugged into the likelihood
 ##'      @param k NB k value to be plugged into the likelihood
 ##'      - - - - - - - - - - - - -       
@@ -144,7 +132,6 @@ likelihood <- function(Y, R, k) {
 ```
 ## Parameter Estimation
 We use profile likelihood to estimate the parameters $R$ and $k$
-
 ```{r}
 ##' _______________________________________________________________________________________________
 ##' Surface/profile likelihood function
@@ -152,7 +139,7 @@ We use profile likelihood to estimate the parameters $R$ and $k$
 ##'      @param data 3-column data frame or matrix containing 
 ##'                  [,1] Custer Size
 ##'                  [,2] Index Cases
-##'                  [,3] Censored status
+##'                  [,3] Censored status (1=censored, 0=uncensored)
 ##'      @param Rrange Range of R values
 ##'      @param krange Range of k values
 ##'      - - - - - - - - - - - - -       
@@ -178,18 +165,65 @@ surflike <- function(data, Rrange, krange){
 ##'      - - - - - - - - - - - - -       
 ##'      @return Point, lower, and upper bound estimates for R and k 
 ##' _______________________________________________________________________________________________
-
-calc_profile <- function(ls, ls_max, conf.interval){
+calc_profile <- function(ls, ls_max, Rrange, krange, conf.interval){
   chiV <- qchisq(conf.interval/100, df = 1) / 2
   prfk <- apply(ls,2,function(x){max(x)})
-  prfk2 <- kkrange[prfk - max(prfk) >- chiV]
+  prfk2 <- krange[prfk - max(prfk) >- chiV]
   prfR <- apply(ls,1,function(x){max(x)})
   prfR2 <- Rrange[prfR - max(prfR) >- chiV]
   
-  output <- rbind(cbind(Rrange[sum(seq(1,length(Rrange))%*%ls_max)], min(prfR2),max(prfR2)),
-                  cbind(kkrange[sum(ls_max%*%seq(1,length(kkrange)))], min(prfk2),max(prfk2)))
+  output <- rbind(cbind(Rrange[sum(seq(1, length(Rrange)) %*% ls_max)], min(prfR2),max(prfR2)),
+                  cbind(krange[sum(ls_max %*% seq(1, length(krange)))], min(prfk2),max(prfk2)))
   colnames(output) <- c("point_est","lower_ci","upper_ci")
   rownames(output) <- c("R","k")
   return(output)
 }
 ```
+
+## Example
+In this example, we demonstrate how the inference procedure works. (1) We first simulate a surveillance system with `5000` individual chains of transmission originating with true underlying negative binomial $R=0.5$ and $k=0.15$, assuming perfect surveillance. (2) We then sum the individual chains to generate a single vector of chain/cluster sizes, obscuring all information on individual transmission. (3) We apply the inference procedure to these data to calculate $\hat{R}$ and $\hat{k}$ from the cluster data.
+```{r}
+set.seed(05062020)
+num_chains <- 5000
+R <- 0.50
+k <- 0.15
+
+######################################################
+## Simulate surveillance data
+######################################################
+# Individual-level data (Z values) - i.e. full distribution of individual secondary cases 
+Z_values <- replicate(num_chains, bp(offspring = rnbinom, mu = R, size = k))
+
+# Cluster data (Y values) - vector of integers representing final chain size
+Y_values <- unlist(lapply(Z_values, function(x) sum(unlist(x))))
+
+######################################################
+## Maximum Likelihood Estimation
+######################################################
+# prep data in proper format (assuming perfect surveillance so all n=1 and no censoring, so all=0)
+Y_data <- data.frame(clust_size = Y_values,
+                     index_cases = 1,
+                     cens_status = 0)
+
+# Define search grid
+resolution <- 0.01 # set resolution (increased resolution increases computer time needed)
+  # R range
+R.min <- 0.01
+R.max <- 1
+Rrange <- seq(R.min, R.max, by = resolution)
+  # k range
+k.min <- 0.01
+k.max <- 1
+krange <- seq(k.min, k.max, by = resolution)
+
+  # Calculate grid of likelihoods 
+Y_surflikes <- surflike(data = Y_data, Rrange = Rrange, krange = krange)
+  # find max in the x,y grid
+Y_maxlikes <- Y_surflikes == max(Y_surflikes)
+  # estimate parameters
+Y_MLE <- calc_profile(ls = Y_surflikes, ls_max = Y_maxlikes, Rrange = Rrange, krange = krange, conf.interval = 95)
+
+Y_MLE
+```
+
+

@@ -23,10 +23,11 @@ bp <- function(gens=20, init.size=1, offspring, ...){
 ##'                  [,1] Custer Size
 ##'                  [,2] Index Cases
 ##'                  [,3] Censored status
+##'                  Where each row is a unique cluster 
 ##'      @param R NB R value to be plugged into the likelihood
 ##'      @param k NB k value to be plugged into the likelihood
 ##'      - - - - - - - - - - - - -       
-##'      @return Sum of the log-likelihoods
+##'      @return Sum of the log-likelihoods 
 ##' _______________________________________________________________________________________________
 
 likelihood <- function(Y,R,k) {
@@ -86,16 +87,77 @@ surflike <- function(data, Rrange, krange){
 ##'      @return Point, lower, and upper bound estimates for R and k 
 ##' _______________________________________________________________________________________________
 
-calc_profile <- function(ls, ls_max, conf.interval){
+calc_profile <- function(ls, ls_max, Rrange, krange, conf.interval){
   chiV <- qchisq(conf.interval/100, df = 1) / 2
   prfk <- apply(ls,2,function(x){max(x)})
-  prfk2 <- kkrange[prfk - max(prfk) >- chiV]
+  prfk2 <- krange[prfk - max(prfk) >- chiV]
   prfR <- apply(ls,1,function(x){max(x)})
   prfR2 <- Rrange[prfR - max(prfR) >- chiV]
   
-  output <- rbind(cbind(Rrange[sum(seq(1,length(Rrange))%*%ls_max)], min(prfR2),max(prfR2)),
-                  cbind(kkrange[sum(ls_max%*%seq(1,length(kkrange)))], min(prfk2),max(prfk2)))
+  output <- rbind(cbind(Rrange[sum(seq(1, length(Rrange)) %*% ls_max)], min(prfR2),max(prfR2)),
+                  cbind(krange[sum(ls_max %*% seq(1, length(krange)))], min(prfk2),max(prfk2)))
   colnames(output) <- c("point_est","lower_ci","upper_ci")
   rownames(output) <- c("R","k")
   return(output)
 }
+
+
+######################################################################################################
+## Example
+######################################################################################################
+#' Simulate a surveillance system with 10000 chains with underlying R=0.5 and k=0.15, 
+#' assuming perfect surveillance
+num_chains <- 10000
+R <- 0.50
+k <- 0.15
+
+######################################################
+## Simulate surveillance data
+######################################################
+set.seed(05062020)
+# Individual-level data (Z values) - i.e. full distribution of individual secondary cases 
+Z_values <- replicate(num_chains, bp(offspring = rnbinom, mu = R, size = k))
+
+# Cluster data (Y values) - vector of integers representing final chain size
+Y_values <- unlist(lapply(Z_values,function(x) sum(unlist(x))))
+
+######################################################
+## Maximum Likelihood Estimation
+######################################################
+
+#####################
+### Individual data
+### For individual level data, use classical methods
+library(MASS)
+Z_MLE <- fitdistr(unlist(lapply(Z_values, function(x) x[-1])),"Negative Binomial")
+
+#####################
+### Cluster data
+### For cluster level data, employ the above custom functions for cluster-based MLE
+  
+# prep data in proper format (assuming perfect surveillance so all n=1 and no censoring)
+Y_data <- data.frame(clust_size = Y_values,
+                     index_cases = 1,
+                     cens_status = 0)
+
+# Define search grid
+resolution <- 0.01 # set resolution (increased resolution increases computer time needed)
+  # R range
+R.min <- 0.01
+R.max <- 1
+Rrange <- seq(R.min, R.max, by = resolution)
+  # k range
+k.min <- 0.01
+k.max <- 1
+krange <- seq(k.min, k.max, by = resolution)
+
+  # Calculate grid of likelihoods 
+Y_surflikes <- surflike(data = Y_data, Rrange = Rrange, krange = krange)
+  # find max in the x,y grid
+Y_maxlikes <- Y_surflikes == max(Y_surflikes)
+  # estimate parameters
+Y_MLE <- calc_profile(ls = Y_surflikes, ls_max = Y_maxlikes, Rrange = Rrange, krange = krange, conf.interval = 95)
+
+
+
+
