@@ -1,4 +1,3 @@
-# rm(list=ls())
 ##' _______________________________________________________________________________________________
 ##' Branching process 
 ##'    General function to generate data from branching process with variable offspring assumptions 
@@ -106,9 +105,9 @@ calc_profile <- function(ls, ls_max, Rrange, krange, conf.interval){
 ######################################################################################################
 ## Example
 ######################################################################################################
-#' Simulate a surveillance system with 10000 chains with underlying R=0.50 and k=0.15, 
+#' Simulate a surveillance system with 10000 chains with underlying R=0.5 and k=0.15, 
 #' assuming perfect surveillance
-num_chains <- 5000
+num_chains <- 10000
 R <- 0.50
 k <- 0.15
 
@@ -125,9 +124,16 @@ Y_values <- unlist(lapply(Z_values,function(x) sum(unlist(x))))
 ######################################################
 ## Maximum Likelihood Estimation
 ######################################################
+
+#####################
+### Individual data
+### For individual level data, use classical methods
+library(MASS)
+Z_MLE <- fitdistr(unlist(lapply(Z_values, function(x) x[-1])),"Negative Binomial")
+
 #####################
 ### Cluster data
-### For cluster level data, call the above custom functions for cluster-based MLE
+### For cluster level data, employ the above custom functions for cluster-based MLE
   
 # prep data in proper format (assuming perfect surveillance so all n=1 and no censoring)
 Y_data <- data.frame(clust_size = Y_values,
@@ -138,11 +144,11 @@ Y_data <- data.frame(clust_size = Y_values,
 resolution <- 0.01 # set resolution (increased resolution increases computer time needed)
   # R range
 R.min <- 0.01
-R.max <- 1.00
+R.max <- 1
 Rrange <- seq(R.min, R.max, by = resolution)
   # k range
 k.min <- 0.01
-k.max <- 1.00
+k.max <- 1
 krange <- seq(k.min, k.max, by = resolution)
 
   # Calculate grid of likelihoods 

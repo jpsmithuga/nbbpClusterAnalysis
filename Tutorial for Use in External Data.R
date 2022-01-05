@@ -237,5 +237,3 @@ calc_profile <- function(ls, ls_max, Rrange, krange, conf.interval){
   rownames(output) <- c("R","k")
   return(output)
 }
-
-

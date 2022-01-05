@@ -108,7 +108,7 @@ imperfect <- function(true_R, true_k, num_chains = 2000, p1, p2, prob_cens, perc
     cens[k] <- sum(lengths(out_list[[k]])) # Get cluster size of censored clusters
     true[k] <- sum(lengths(z.broken[[k]])) # Get cluster size of uncensored (but imperfect obs) clusters
   }
-  Y_cens <- data.frame(y.cens = cens, censor = ifelse(cens!=true,1,0)) #Create a censoring index (1=censored, 0=uncensored)
+  Y_cens <- data.frame(y.cens = cens, censor = ifelse(cens != true,1,0)) #Create a censoring index (1=censored, 0=uncensored)
 
   ## - - - - - - - - - - - - - - - - - - - - -
   ## Overlapping clusters
